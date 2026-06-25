@@ -1,0 +1,17 @@
+{
+  "name": "Partum Domains",
+  "short_name": "Partum",
+  "description": "Bóveda local para dominios, accesos, vencimientos y respaldos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f1eb",
+  "theme_color": "#10131a",
+  "icons": [
+    {
+      "src": "/icons/partum-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
