@@ -90,6 +90,40 @@ const randomBytes = (length: number) => crypto.getRandomValues(new Uint8Array(le
 const getKdfIterations = (metadata: Pick<VaultMetadata, "kdf"> | null) =>
   metadata?.kdf?.iterations ?? LEGACY_ITERATIONS;
 
+const hasEncryptedPayload = (payload: unknown): payload is { iv: string; data: string } =>
+  typeof payload === "object" &&
+  payload !== null &&
+  typeof (payload as { iv?: unknown }).iv === "string" &&
+  typeof (payload as { data?: unknown }).data === "string";
+
+const assertValidBackup = (backup: VaultBackup) => {
+  if (!backup || backup.app !== "Partum Domains" || backup.schemaVersion !== 1) {
+    throw new Error("El respaldo no pertenece a Partum Domains.");
+  }
+
+  if (
+    backup.metadata?.schemaVersion !== 1 ||
+    !backup.metadata.vaultId ||
+    !backup.metadata.salt ||
+    !hasEncryptedPayload(backup.metadata.verifier) ||
+    !Array.isArray(backup.events)
+  ) {
+    throw new Error("El respaldo está incompleto o dañado.");
+  }
+
+  backup.events.forEach((event) => {
+    if (
+      !event?.id ||
+      !event.domainId ||
+      !event.type ||
+      !event.at ||
+      !hasEncryptedPayload(event.payload)
+    ) {
+      throw new Error("El respaldo contiene eventos incompletos o dañados.");
+    }
+  });
+};
+
 const loginSecret = (username: string | undefined, password: string) =>
   username ? `${username}:${password}` : password;
 
@@ -302,18 +336,26 @@ export const exportEncryptedBackup = async (): Promise<VaultBackup> => {
   };
 };
 
-export const importEncryptedBackup = async (backup: VaultBackup) => {
-  if (backup.app !== "Partum Domains" || backup.schemaVersion !== 1) {
-    throw new Error("El respaldo no pertenece a Partum Domains.");
-  }
+export const importEncryptedBackup = async (
+  backup: VaultBackup,
+  options: { replaceExisting?: boolean } = {},
+) => {
+  assertValidBackup(backup);
 
   const existing = await getVaultMetadata();
+  const replacesExisting = Boolean(existing && existing.vaultId !== backup.metadata.vaultId);
 
-  if (existing && existing.vaultId !== backup.metadata.vaultId) {
-    throw new Error("Este respaldo pertenece a otra bóveda.");
+  if (replacesExisting && !options.replaceExisting) {
+    throw new Error(
+      "Este respaldo pertenece a otra bóveda. Para restaurarlo, confirma que quieres reemplazar la bóveda local actual.",
+    );
   }
 
-  if (!existing) {
+  if (replacesExisting) {
+    await resetLocalVault();
+  }
+
+  if (!existing || replacesExisting) {
     await putMetadata(backup.metadata);
   }
 

@@ -340,7 +340,39 @@ const App = () => {
   };
 
   const handleImportBackup = async (backup: VaultBackup) => {
-    await importEncryptedBackup(backup);
+    const existingMetadata = await getVaultMetadata();
+    const replaceExisting = Boolean(
+      existingMetadata &&
+        backup?.metadata?.vaultId &&
+        existingMetadata.vaultId !== backup.metadata.vaultId,
+    );
+
+    if (replaceExisting) {
+      const confirmed = window.confirm(
+        "Este respaldo pertenece a otra bóveda local. Si continúas, se reemplazará la bóveda guardada en este navegador por el backup seleccionado. Antes de hacerlo, exporta la bóveda actual si necesitas conservarla.\n\n¿Restaurar este respaldo?",
+      );
+
+      if (!confirmed) {
+        throw new Error("Restauración cancelada.");
+      }
+    }
+
+    await importEncryptedBackup(backup, { replaceExisting });
+    await refreshBackups();
+
+    if (replaceExisting) {
+      setSession(null);
+      setRecords([]);
+      setEvents([]);
+      setSelectedId(null);
+      setDraft(null);
+      setIsFormOpen(false);
+      setHistoryOpen(false);
+      setBackupPanelOpen(false);
+      setGateMode("locked");
+      showToast("Respaldo restaurado. Desbloquea con su usuario y contraseña maestra.");
+      return;
+    }
 
     if (session) {
       await loadData(session);
@@ -521,7 +553,14 @@ const App = () => {
           <strong>Bóveda cifrada de dominios</strong>
         </div>
         <div className="topbar-actions">
-          <IconButton label="Importar respaldo" icon={<Upload size={18} />} onClick={() => {}} asFile onFile={handleImportBackup} />
+          <IconButton
+            label="Importar respaldo"
+            icon={<Upload size={18} />}
+            onClick={() => {}}
+            asFile
+            onFile={handleImportBackup}
+            onFileError={showToast}
+          />
           <IconButton label="Exportar respaldo" icon={<Download size={18} />} onClick={handleExport} />
           <IconButton label="Backups automáticos" icon={<Database size={18} />} onClick={() => setBackupPanelOpen(true)} />
           <IconButton label="Notificaciones" icon={<Bell size={18} />} onClick={handleNotify} />
@@ -1018,16 +1057,30 @@ interface IconButtonProps {
   onClick: () => void | Promise<void>;
   asFile?: boolean;
   onFile?: (backup: VaultBackup) => Promise<void>;
+  onFileError?: (message: string) => void;
 }
 
-const IconButton = ({ label, icon, onClick, asFile = false, onFile }: IconButtonProps) => {
+const IconButton = ({
+  label,
+  icon,
+  onClick,
+  asFile = false,
+  onFile,
+  onFileError,
+}: IconButtonProps) => {
   const handleFile = async (file: File | null) => {
     if (!file || !onFile) {
       return;
     }
 
-    const backup = JSON.parse(await file.text()) as VaultBackup;
-    await onFile(backup);
+    try {
+      const backup = JSON.parse(await file.text()) as VaultBackup;
+      await onFile(backup);
+    } catch (caughtError) {
+      onFileError?.(
+        caughtError instanceof Error ? caughtError.message : "No se pudo importar el respaldo.",
+      );
+    }
   };
 
   if (asFile) {
